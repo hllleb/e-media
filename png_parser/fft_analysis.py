@@ -42,10 +42,29 @@ class FFTAnalyzer:
         """
         Return the image as a 2-D (grayscale) numpy float64 array of shape
         (height, width).  Result is cached after the first call.
+
+        RGB/RGBA images are converted to luminance (Rec.601) because the 2-D
+        FFT operates on a single channel.  Use :meth:`get_display_array` to
+        obtain the original colours for visualization.
         """
         if self._pixel_array is not None:
             return self._pixel_array
 
+        rgb = self._load_channel_array()
+        channels = rgb.shape[2]
+
+        if channels == 1:
+            gray = rgb[:, :, 0]
+        elif channels == 2:
+            gray = rgb[:, :, 0]
+        else:
+            gray = 0.299 * rgb[:, :, 0] + 0.587 * rgb[:, :, 1] + 0.114 * rgb[:, :, 2]
+
+        self._pixel_array = gray
+        return self._pixel_array
+
+    def _load_channel_array(self) -> np.ndarray:
+        """Return pixels as float64 array of shape (height, width, channels) in [0, 1]."""
         image_data = self.png_file.get_image_data()
         raw_pixels = image_data.to_flat_pixels()
 
@@ -58,32 +77,27 @@ class FFTAnalyzer:
         if bit_depth == 16:
             arr = arr.byteswap().newbyteorder()
 
-        arr = arr.reshape(height, width, channels)
-
-        # Convert to float luminance
-        if channels == 1:
-            gray = arr[:, :, 0].astype(np.float64)
-        elif channels == 2:
-            # Grayscale + alpha – use luminance channel only
-            gray = arr[:, :, 0].astype(np.float64)
-        elif channels == 3:
-            # RGB → luminance (Rec.601)
-            gray = (
-                0.299 * arr[:, :, 0]
-                + 0.587 * arr[:, :, 1]
-                + 0.114 * arr[:, :, 2]
-            )
-        else:
-            # RGBA
-            gray = (
-                0.299 * arr[:, :, 0]
-                + 0.587 * arr[:, :, 1]
-                + 0.114 * arr[:, :, 2]
-            )
-
+        arr = arr.reshape(height, width, channels).astype(np.float64)
         max_val = (2 ** bit_depth) - 1
-        self._pixel_array = gray / max_val
-        return self._pixel_array
+        return arr / max_val
+
+    def get_display_array(self) -> np.ndarray:
+        """
+        Return pixels ready for ``imshow``.
+
+        RGB/RGBA images are returned as (H, W, 3) float arrays in [0, 1].
+        Grayscale images are returned as (H, W) float arrays in [0, 1].
+        """
+        rgb = self._load_channel_array()
+        channels = rgb.shape[2]
+
+        if channels == 1:
+            return rgb[:, :, 0]
+        if channels == 2:
+            return rgb[:, :, 0]
+        if channels == 4:
+            return rgb[:, :, :3]
+        return rgb
 
     # ------------------------------------------------------------------
     # FFT computation
@@ -112,23 +126,26 @@ class FFTAnalyzer:
     ) -> None:
         """
         Display a side-by-side figure:
-            Left  – original image (grayscale)
+            Left  – original image (colour when RGB/RGBA, else grayscale)
             Right – log-magnitude FFT spectrum (DC at centre)
 
         Parameters:
             save_path – if provided, save the figure to this path.
             show      – if True, call plt.show() (blocks until window closed).
         """
-        pixels = self.get_pixel_array()
+        display = self.get_display_array()
         spectrum = self.compute_fft()
 
         ihdr = self.png_file.get_ihdr()
         fig = plt.figure(figsize=(12, 5))
         gs = gridspec.GridSpec(1, 2, figure=fig)
 
-        # Original image
+        # Original image – show true colours for RGB/RGBA
         ax_img = fig.add_subplot(gs[0])
-        ax_img.imshow(pixels, cmap="gray", vmin=0, vmax=1)
+        if display.ndim == 3:
+            ax_img.imshow(display, vmin=0, vmax=1)
+        else:
+            ax_img.imshow(display, cmap="gray", vmin=0, vmax=1)
         ax_img.set_title(
             f"Original image\n"
             f"{ihdr.width}x{ihdr.height} px - {ihdr.color_type_name}"

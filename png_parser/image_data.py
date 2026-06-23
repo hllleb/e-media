@@ -323,12 +323,25 @@ def _decode_interlaced(header: ImageHeaderParams, raw: bytes) -> list[bytes]:
 
         for y in range(y_start, header.height, y_step):
             if cursor >= len(raw):
-                raise ValueError("Truncated interlaced PNG image data.")
+                raise ValueError(
+                    f"Truncated interlaced PNG image data at Adam7 pass "
+                    f"(x_start={x_start}, y={y}): expected more scanlines "
+                    f"but only {cursor} of {len(raw)} bytes are available. "
+                    f"The IDAT stream may be incomplete."
+                )
             filter_type = raw[cursor]
             cursor += 1
             scanline = raw[cursor : cursor + pass_row_len]
             if len(scanline) < pass_row_len:
-                raise ValueError("Truncated interlaced PNG scanline.")
+                rows_done = len(range(y_start, y, y_step))
+                rows_expected = len(range(y_start, header.height, y_step))
+                raise ValueError(
+                    f"Truncated interlaced PNG scanline at Adam7 pass "
+                    f"(x_start={x_start}, y={y}): need {pass_row_len} bytes, "
+                    f"got {len(scanline)} (row {rows_done + 1}/{rows_expected} "
+                    f"in this pass). The file is likely corrupt or was saved "
+                    f"incompletely."
+                )
             cursor += pass_row_len
             reconstructed = undo_filter(header, filter_type, scanline, previous)
             previous = reconstructed
